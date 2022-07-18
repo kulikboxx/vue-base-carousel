@@ -8,27 +8,29 @@
     >
         <div class="base-carousel__line">
             <ul class="base-carousel__wrapper">
-                <li v-for="(item, index) in computedItems" :key="index" class="base-carousel__item">
+                <li v-for="(item, index) in transformedItems" :key="index" class="base-carousel__item">
                     <slot v-bind="{ item }" name="baseCarouselItem" />
                 </li>
             </ul>
         </div>
 
-        <button class="base-carousel__prev" @click="swipeItem(1)">
-            <slot name="baseCarouselPrev" />
-        </button>
-        <button class="base-carousel__next" @click="swipeItem(-1)">
-            <slot name="baseCarouselNext" />
-        </button>
+        <div class="base-carousel__actions">
+            <div class="base-carousel__prev" @click="swipeItem(1)">
+                <slot name="baseCarouselPrev" />
+            </div>
+            <div class="base-carousel__next" @click="swipeItem(-1)">
+                <slot name="baseCarouselNext" />
+            </div>
+        </div>
     </div>
 </template>
 
 <script lang="ts" setup>
-import { computed, reactive, ref, onMounted, onUnmounted } from 'vue';
+import { computed, ref, onMounted, onUnmounted } from 'vue';
 
 interface Props {
     duration?: number;
-    items: Array<any>;
+    items: Array<Record<PropertyKey, unknown>>;
     itemsPerView?: number;
     spaceBetween?: number;
     timing?: string;
@@ -42,63 +44,56 @@ const props = withDefaults(defineProps<Props>(), {
 });
 
 const baseCarouselRef = ref<HTMLDivElement>();
-const carouselStyles = reactive({
-    offsetWidth: 0,
-    padding: 0,
-    whiteSpace: 0,
-});
 
-const currentItem = ref(0);
-const shiftX = ref(0);
-const touchStart = ref(0);
+const itemSize = ref('');
+const itemsGap = ref(props.spaceBetween + 'px');
+const lineShift = ref('');
+const shiftX = ref('');
 const transition = ref('');
 
-function getCarouselStyles() {
-    if (baseCarouselRef.value) {
-        const carousel = baseCarouselRef.value;
+const currentItem = ref(0);
+const touchStart = ref(0);
 
-        const paddingLeft = parseFloat(window.getComputedStyle(carousel).paddingLeft);
-        const paddingRight = parseFloat(window.getComputedStyle(carousel).paddingRight);
+const transformedItems = computed(() => [...props.items, ...props.items, ...props.items]);
 
-        carouselStyles.offsetWidth = parseFloat(window.getComputedStyle(carousel).width);
-        carouselStyles.padding = paddingLeft + paddingRight;
-        carouselStyles.whiteSpace = props.spaceBetween * (props.itemsPerView - 1);
-    }
-}
+const resizeObserver = new ResizeObserver((entries) => {
+    entries.forEach((entry) => {
+        const carouselSize = entry.contentBoxSize[0].inlineSize;
+        const whiteSpace = props.spaceBetween * (props.itemsPerView - 1);
+        const elemSize = (carouselSize - whiteSpace) / props.itemsPerView;
 
-const computedItems = computed(() => [...props.items, ...props.items, ...props.items]);
-const computedItemGap = computed(() => props.spaceBetween + 'px');
-const computedShiftX = computed(() => shiftX.value + 'px');
+        itemSize.value = elemSize + 'px';
+        lineShift.value = -(elemSize + props.spaceBetween) * props.items.length + 'px';
 
-const computedItemWidth = computed(
-    () => (carouselStyles.offsetWidth - carouselStyles.padding - carouselStyles.whiteSpace) / props.itemsPerView + 'px'
-);
+        manageTransition(swipeItem);
+    });
+});
 
-const computedLineShift = computed(
-    () => -(parseFloat(computedItemWidth.value) + props.spaceBetween) * props.items.length + 'px'
-);
-
-function swipeItem(num: number) {
+function swipeItem(num: number = 0) {
     const number = (currentItem.value += num);
-    shiftX.value = number * parseFloat(computedItemWidth.value) + number * props.spaceBetween;
+    shiftX.value = number * parseFloat(itemSize.value) + number * props.spaceBetween + 'px';
 }
 
-function toggleTransition(isTransition: boolean = true) {
+function switchTransition(isTransition: boolean = true) {
     transition.value = isTransition ? `transform ${props.duration}ms ${props.timing}` : 'none';
 }
 
+function manageTransition(callback: Function) {
+    switchTransition(false);
+    callback();
+    setTimeout(() => switchTransition(true));
+}
+
 function checkShiftX() {
-    const itemWidthWithWhiteSpace = parseFloat(computedItemWidth.value) + props.spaceBetween;
-    const startShiftX = shiftX.value <= -(itemWidthWithWhiteSpace * props.items.length);
-    const endShiftX = shiftX.value >= itemWidthWithWhiteSpace * props.itemsPerView;
+    const itemWidthWithWhiteSpace = parseFloat(itemSize.value) + props.spaceBetween;
+    const startX = parseFloat(shiftX.value) <= -(itemWidthWithWhiteSpace * props.items.length);
+    const endX = parseFloat(shiftX.value) >= itemWidthWithWhiteSpace * props.itemsPerView;
 
-    if (startShiftX || endShiftX) {
-        toggleTransition(false);
-
-        shiftX.value = startShiftX ? 0 : -(props.items.length - props.itemsPerView) * itemWidthWithWhiteSpace;
-        currentItem.value = startShiftX ? 0 : -(props.items.length - props.itemsPerView);
-
-        setTimeout(() => toggleTransition(true));
+    if (startX || endX) {
+        manageTransition(() => {
+            shiftX.value = startX ? '0px' : `${-(props.items.length - props.itemsPerView) * itemWidthWithWhiteSpace}px`;
+            currentItem.value = startX ? 0 : -(props.items.length - props.itemsPerView);
+        });
     }
 }
 
@@ -121,35 +116,33 @@ function onKeyDown(e: KeyboardEvent) {
     if (e.key === 'ArrowRight') swipeItem(-1);
 }
 
-function toggleTriggers(isMounted: boolean = true) {
-    if (isMounted) {
-        window.addEventListener('resize', initCarousel);
-        document.addEventListener('keydown', onKeyDown);
-        return;
+onMounted(() => {
+    switchTransition(true);
+
+    if (baseCarouselRef.value) {
+        resizeObserver.observe(baseCarouselRef.value);
     }
 
-    window.removeEventListener('resize', initCarousel);
+    document.addEventListener('keydown', onKeyDown);
+});
+
+onUnmounted(() => {
+    if (baseCarouselRef.value) {
+        resizeObserver.unobserve(baseCarouselRef.value);
+    }
+
     document.removeEventListener('keydown', onKeyDown);
-}
-
-function initCarousel() {
-    getCarouselStyles();
-    toggleTransition(true);
-    swipeItem(0);
-    toggleTriggers();
-}
-
-onMounted(() => initCarousel());
-onUnmounted(() => toggleTriggers(false));
+});
 </script>
 
 <style lang="scss">
 .base-carousel {
     position: relative;
     margin-inline: auto;
+    padding: 1rem;
     width: 100%;
     max-width: 1200px;
-    height: 400px;
+    background-color: #444;
     user-select: none;
     overflow: hidden;
     z-index: 0;
@@ -161,46 +154,37 @@ onUnmounted(() => toggleTriggers(false));
     }
 
     &__line {
-        transform: translateX(v-bind(computedLineShift));
+        transform: translateX(v-bind(lineShift));
     }
 
     &__wrapper {
         display: flex;
         align-items: stretch;
         width: max-content;
-        gap: v-bind(computedItemGap);
+        gap: v-bind(itemsGap);
         transition: v-bind(transition);
-        transform: translateX(v-bind(computedShiftX));
+        transform: translateX(v-bind(shiftX));
         list-style: none;
     }
 
     &__item {
-        width: v-bind(computedItemWidth);
+        width: v-bind(itemSize);
+        height: 400px;
+    }
+
+    &__actions {
+        position: absolute;
+        top: 50%;
+        left: 0;
+        right: 0;
+        transform: translateY(-50%);
+        display: flex;
+        justify-content: space-between;
     }
 
     &__prev,
     &__next {
-        position: absolute;
-        top: 50%;
-        transform: translateY(-50%);
-        display: inline-flex;
-        justify-content: center;
-        align-items: center;
-        background: none;
-        border: none;
         cursor: pointer;
-
-        &:focus {
-            outline: none;
-        }
-    }
-
-    &__prev {
-        left: 0;
-    }
-
-    &__next {
-        right: 0;
     }
 }
 </style>

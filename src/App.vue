@@ -1,5 +1,11 @@
 <template>
-    <base-carousel v-bind="{ items: elements, itemsPerView: 4, spaceBetween: 10 }">
+    <base-carousel
+        v-bind="{
+            items: elements,
+            itemsPerView: 3,
+            spaceBetween: 10,
+        }"
+    >
         <template #baseCarouselItem="{ item }">
             <div class="card">
                 <p>
