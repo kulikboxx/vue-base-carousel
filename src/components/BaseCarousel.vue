@@ -9,7 +9,7 @@
     <div class="base-carousel__line">
       <ul class="base-carousel__wrapper">
         <li
-          v-for="(item, index) in transformedItems"
+          v-for="(item, index) in computedItems"
           :key="index"
           class="base-carousel__item"
         >
@@ -30,9 +30,10 @@
 </template>
 
 <script lang="ts" setup>
-import { computed, ref, onMounted, onBeforeUnmount } from "vue";
+import { computed, reactive, ref, onMounted, onBeforeUnmount } from 'vue';
 
 interface Props {
+  breakpoints?: Record<PropertyKey, Record<string, number>>;
   items: Array<Record<PropertyKey, unknown>>;
   itemsPerView?: number;
   loopDuration?: number;
@@ -42,57 +43,108 @@ interface Props {
 }
 
 const props = withDefaults(defineProps<Props>(), {
+  breakpoints: () => ({ 200: { itemsPerView: 1 } }),
   itemsPerView: 1,
   loopDuration: 6000,
   spaceBetween: 0,
   transitionDuration: 1200,
-  timing: "ease",
+  timing: 'ease',
 });
 
 const baseCarouselRef = ref<HTMLDivElement>();
-
-const itemSize = ref("");
-const itemsGap = ref(props.spaceBetween + "px");
-const lineShift = ref("");
-const shiftX = ref("");
-const transition = ref("");
-
-const currentItem = ref(0);
 const loopTimer = ref(0);
-const touchStart = ref(0);
 
-const transformedItems = computed(() => [
+const carousel = reactive({
+  currentItem: 0,
+  itemWidth: '',
+  itemsGap: `${props.spaceBetween}px`,
+  lineShift: '',
+  minItemWidth: 200,
+  shiftX: '',
+  transition: '',
+  touchStart: 0,
+  whiteSpaces: 0,
+  visibleItems: 1,
+});
+
+const computedItems = computed(() => [
   ...props.items,
   ...props.items,
   ...props.items,
 ]);
 
-const resizeObserver = new ResizeObserver((entries) => {
+const carouselObserver = new ResizeObserver((entries) => {
   entries.forEach((entry) => {
-    const carouselSize = entry.contentBoxSize[0].inlineSize;
-    const whiteSpace = props.spaceBetween * (props.itemsPerView - 1);
-    const elemSize = (carouselSize - whiteSpace) / props.itemsPerView;
-
-    itemSize.value = elemSize + "px";
-    lineShift.value =
-      -(elemSize + props.spaceBetween) * props.items.length + "px";
-
+    computeItemWidth();
+    computeWhiteSpaces();
+    setItemWidth(entry.contentBoxSize[0].inlineSize);
+    setLineShift();
     manageTransition(swipeItem);
   });
 });
 
+const computedBreakpoints = computed(() => {
+  const breakpoints = [];
+
+  for (const key in props.breakpoints) {
+    breakpoints.push({
+      breakpoint: +key,
+      visibleItems: props.breakpoints[key].itemsPerView,
+    });
+  }
+
+  return breakpoints;
+});
+
+function computeWhiteSpaces() {
+  carousel.whiteSpaces =
+    parseFloat(carousel.itemsGap) * (carousel.visibleItems - 1);
+}
+
+function computeItemWidth() {
+  const breakpointsArray = computedBreakpoints.value;
+  const screenWidth = window.innerWidth;
+  const lastBreakpoint = breakpointsArray[breakpointsArray.length - 1];
+
+  for (let i = 0; i < breakpointsArray.length; i++) {
+    if (
+      screenWidth < lastBreakpoint.breakpoint &&
+      screenWidth >= breakpointsArray[i].breakpoint &&
+      screenWidth <= breakpointsArray[i + 1].breakpoint
+    ) {
+      carousel.visibleItems = breakpointsArray[i].visibleItems;
+    } else if (screenWidth >= lastBreakpoint.breakpoint) {
+      carousel.visibleItems = lastBreakpoint.visibleItems;
+    }
+  }
+}
+
+function setItemWidth(carouselWidth: number) {
+  carousel.itemWidth =
+    (carouselWidth - carousel.whiteSpaces) / carousel.visibleItems + 'px';
+}
+
+function setLineShift() {
+  carousel.lineShift =
+    -(parseFloat(carousel.itemWidth) + props.spaceBetween) *
+      props.items.length +
+    'px';
+}
+
 function swipeItem(num: number = 0) {
   updateLoopTimer(true);
 
-  const number = (currentItem.value += num);
-  shiftX.value =
-    number * parseFloat(itemSize.value) + number * props.spaceBetween + "px";
+  const number = (carousel.currentItem += num);
+  carousel.shiftX =
+    number * parseFloat(carousel.itemWidth) +
+    number * props.spaceBetween +
+    'px';
 }
 
 function switchTransition(isTransition: boolean = true) {
-  transition.value = isTransition
+  carousel.transition = isTransition
     ? `transform ${props.transitionDuration}ms ${props.timing}`
-    : "none";
+    : 'none';
 }
 
 function manageTransition(callback: Function) {
@@ -103,20 +155,22 @@ function manageTransition(callback: Function) {
 
 function checkShiftX() {
   const itemWidthWithWhiteSpace =
-    parseFloat(itemSize.value) + props.spaceBetween;
+    parseFloat(carousel.itemWidth) + props.spaceBetween;
   const startX =
-    parseFloat(shiftX.value) <= -(itemWidthWithWhiteSpace * props.items.length);
+    parseFloat(carousel.shiftX) <=
+    -(itemWidthWithWhiteSpace * props.items.length);
   const endX =
-    parseFloat(shiftX.value) >= itemWidthWithWhiteSpace * props.itemsPerView;
+    parseFloat(carousel.shiftX) >= itemWidthWithWhiteSpace * props.itemsPerView;
 
   if (startX || endX) {
     manageTransition(() => {
-      shiftX.value = startX
-        ? "0px"
+      carousel.shiftX = startX
+        ? '0px'
         : `${
             -(props.items.length - props.itemsPerView) * itemWidthWithWhiteSpace
           }px`;
-      currentItem.value = startX
+
+      carousel.currentItem = startX
         ? 0
         : -(props.items.length - props.itemsPerView);
     });
@@ -134,20 +188,20 @@ function updateLoopTimer(start?: boolean) {
 function onTouch(e: TouchEvent) {
   let touchEnd = 0;
 
-  if (e.type === "touchstart") {
-    touchStart.value = e.touches[0].clientX;
+  if (e.type === 'touchstart') {
+    carousel.touchStart = e.touches[0].clientX;
   } else {
     touchEnd = e.changedTouches[0].clientX;
   }
 
-  if (touchStart.value && touchEnd) {
-    swipeItem(touchStart.value - touchEnd < 0 ? 1 : -1);
+  if (carousel.touchStart && touchEnd) {
+    swipeItem(carousel.touchStart - touchEnd < 0 ? 1 : -1);
   }
 }
 
 function onKeyDown(e: KeyboardEvent) {
-  if (e.key === "ArrowLeft") swipeItem(1);
-  if (e.key === "ArrowRight") swipeItem(-1);
+  if (e.key === 'ArrowLeft') swipeItem(1);
+  if (e.key === 'ArrowRight') swipeItem(-1);
 }
 
 function loopCarousel() {
@@ -159,19 +213,19 @@ onMounted(() => {
   updateLoopTimer(true);
 
   if (baseCarouselRef.value) {
-    resizeObserver.observe(baseCarouselRef.value);
+    carouselObserver.observe(baseCarouselRef.value);
   }
 
-  document.addEventListener("keydown", onKeyDown);
+  document.addEventListener('keydown', onKeyDown);
 });
 
 onBeforeUnmount(() => {
   if (baseCarouselRef.value) {
-    resizeObserver.unobserve(baseCarouselRef.value);
+    carouselObserver.unobserve(baseCarouselRef.value);
   }
 
   updateLoopTimer(false);
-  document.removeEventListener("keydown", onKeyDown);
+  document.removeEventListener('keydown', onKeyDown);
 });
 </script>
 
@@ -194,21 +248,21 @@ onBeforeUnmount(() => {
   }
 
   &__line {
-    transform: translateX(v-bind(lineShift));
+    transform: translateX(v-bind('carousel.lineShift'));
   }
 
   &__wrapper {
     display: flex;
     align-items: stretch;
     width: max-content;
-    gap: v-bind(itemsGap);
-    transition: v-bind(transition);
-    transform: translateX(v-bind(shiftX));
+    gap: v-bind('carousel.itemsGap');
+    transition: v-bind('carousel.transition');
+    transform: translateX(v-bind('carousel.shiftX'));
     list-style: none;
   }
 
   &__item {
-    width: v-bind(itemSize);
+    width: v-bind('carousel.itemWidth');
     height: 400px;
   }
 
