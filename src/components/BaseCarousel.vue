@@ -1,13 +1,19 @@
 <template>
   <div
-    class="base-carousel"
+    :class="[
+      'base-carousel',
+      { 'base-carousel--disabled': isCarouselDisabled },
+    ]"
     ref="baseCarouselRef"
-    @touchstart="onTouch($event)"
-    @touchend="onTouch($event)"
-    @transitionend="checkShiftX()"
+    @transitionstart="toggleCarouselDisabled(true)"
+    @transitionend="toggleCarouselDisabled(false), checkShiftX()"
   >
     <div class="base-carousel__line">
-      <ul class="base-carousel__wrapper">
+      <ul
+        class="base-carousel__wrapper"
+        @touchstart="onTouch($event)"
+        @touchend="onTouch($event)"
+      >
         <li
           v-for="(item, index) in computedItems"
           :key="index"
@@ -52,6 +58,7 @@ const props = withDefaults(defineProps<Props>(), {
 });
 
 const baseCarouselRef = ref<HTMLDivElement>();
+const isCarouselDisabled = ref(false);
 const loopTimer = ref(0);
 
 const carousel = reactive({
@@ -135,6 +142,7 @@ function swipeItem(num: number = 0) {
   updateLoopTimer(true);
 
   const number = (carousel.currentItem += num);
+
   carousel.shiftX =
     number * parseFloat(carousel.itemWidth) +
     number * props.spaceBetween +
@@ -151,6 +159,10 @@ function manageTransition(callback: Function) {
   switchTransition(false);
   callback();
   setTimeout(() => switchTransition(true));
+}
+
+function toggleCarouselDisabled(val: boolean) {
+  isCarouselDisabled.value = val;
 }
 
 function checkShiftX() {
@@ -240,6 +252,10 @@ onBeforeUnmount(() => {
   user-select: none;
   overflow: hidden;
   z-index: 0;
+
+  &--disabled {
+    pointer-events: none;
+  }
 
   &__line,
   &__wrapper,
